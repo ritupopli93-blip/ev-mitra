@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>EV-Mitra — Intelligent EV Mobility Platform</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.25.6/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// Change this if your backend runs somewhere else
+const API_BASE = "http://localhost:8000";
+
+function Card({ title, children }) {
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg">
+      <h2 className="text-lg font-semibold mb-3 text-emerald-400">{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+function RoutePlanner() {
+  const [origin, setOrigin] = useState("Delhi");
+  const [destination, setDestination] = useState("Gurgaon");
+  const [battery, setBattery] = useState(38);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const plan = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/route-plan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, destination, battery_percent: Number(battery) }),
+      });
+      setResult(await res.json());
+    } catch (e) {
+      setResult({ error: "Could not reach backend. Is it running on :8000?" });
+    }
+    setLoading(false);
+  };
+
+  return (
+    <Card title="🔋 AI Battery-Aware Route Planner">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+        <input className="bg-slate-800 rounded-lg px-3 py-2" value={origin} onChange={e => setOrigin(e.target.value)} placeholder="From" />
+        <input className="bg-slate-800 rounded-lg px-3 py-2" value={destination} onChange={e => setDestination(e.target.value)} placeholder="To" />
+        <input className="bg-slate-800 rounded-lg px-3 py-2" type="number" value={battery} onChange={e => setBattery(e.target.value)} placeholder="Battery %" />
+      </div>
+      <button onClick={plan} className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-medium px-4 py-2 rounded-lg">
+        {loading ? "Calculating..." : "Plan Route"}
+      </button>
+      {result && !result.error && (
+        <div className="mt-4 space-y-2">
+          {result.routes.map(r => (
+            <div key={r.name} className="bg-slate-800 rounded-lg p-3 flex justify-between text-sm">
+              <span>{r.name} — {r.distance_km} km</span>
+              <span>🔋 {r.battery_required_pct}% · ⏱️ {r.eta_minutes} min · ₹{r.charging_cost_inr}</span>
+            </div>
+          ))}
+          <p className="text-emerald-400 text-sm mt-2">✅ {result.ai_recommendation}</p>
+        </div>
+      )}
+      {result && result.error && <p className="text-red-400 text-sm mt-3">{result.error}</p>}
+    </Card>
+  );
+}
+
+function StationFinder() {
+  const [data, setData] = useState(null);
+  const load = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/stations`);
+      setData(await res.json());
+    } catch (e) {
+      setData({ error: "Could not reach backend." });
+    }
+  };
+  useEffect(() => { load(); }, []);
+  return (
+    <Card title="⚡ Smart Charging Station Finder">
+      {data && !data.error ? (
+        <div className="space-y-2">
+          {data.stations.map(s => (
+            <div key={s.name} className={`rounded-lg p-3 text-sm flex justify-between ${s.name === data.ai_recommended ? "bg-emerald-900/40 border border-emerald-500" : "bg-slate-800"}`}>
+              <span>{s.name} · {s.distance_km} km {s.name === data.ai_recommended && "⭐"}</span>
+              <span>{s.status === "available" ? "🟢" : "🔴"} ₹{s.price_per_kwh}/kWh · {s.fast_charger ? "Fast" : "Standard"}</span>
+            </div>
+          ))}
+        </div>
+      ) : <p className="text-red-400 text-sm">{data && data.error}</p>}
+    </Card>
+  );
+}
+
+function DemandForecast() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    fetch(`${API_BASE}/api/demand-forecast`).then(r => r.json()).then(setData).catch(() => setData({ error: true }));
+  }, []);
+  return (
+    <Card title="🔮 Charging Demand Forecast">
+      {data && !data.error ? (
+        <div>
+          <div className="flex items-end gap-2 h-32">
+            {data.forecast.map(f => (
+              <div key={f.hour} className="flex flex-col items-center flex-1">
+                <div className="bg-emerald-500 w-full rounded-t" style={{ height: `${f.demand_index * 10}px` }}></div>
+                <span className="text-[10px] mt-1 text-slate-400">{f.hour}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-emerald-400 text-sm mt-3">📈 {data.message}</p>
+        </div>
+      ) : <p className="text-red-400 text-sm">Could not load forecast.</p>}
+    </Card>
+  );
+}
+
+function EmergencyMode() {
+  const [battery, setBattery] = useState(8);
+  const [result, setResult] = useState(null);
+  const check = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/emergency?battery_percent=${battery}`);
+      setResult(await res.json());
+    } catch (e) {
+      setResult({ message: "Could not reach backend." });
+    }
+  };
+  return (
+    <Card title="🚑 Emergency / Low-Battery Mode">
+      <div className="flex gap-2 mb-3">
+        <input className="bg-slate-800 rounded-lg px-3 py-2 w-24" type="number" value={battery} onChange={e => setBattery(e.target.value)} />
+        <button onClick={check} className="bg-red-500 hover:bg-red-400 px-4 py-2 rounded-lg font-medium">Check Status</button>
+      </div>
+      {result && (
+        <p className={`text-sm ${result.critical ? "text-red-400" : "text-emerald-400"}`}>
+          {result.critical ? "🔴" : "🟢"} {result.message}
+        </p>
+      )}
+    </Card>
+  );
+}
+
+function App() {
+  return (
+    <div className="max-w-5xl mx-auto p-6">
+      <header className="mb-8 text-center">
+        <h1 className="text-3xl font-bold">⚡ EV-Mitra</h1>
+        <p className="text-slate-400 mt-1">Intelligent EV Mobility Platform — Ideathon Prototype</p>
+      </header>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <RoutePlanner />
+        <StationFinder />
+        <DemandForecast />
+        <EmergencyMode />
+      </div>
+      <footer className="text-center text-slate-600 text-xs mt-10">
+        Backend expected at {API_BASE} — run `uvicorn main:app --reload` inside /backend
+      </footer>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
