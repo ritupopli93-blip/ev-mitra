@@ -15,12 +15,9 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-import os
 import random
-from dotenv import load_dotenv
-from pymongo import MongoClient
 
-load_dotenv()  # reads MONGO_URI from backend/.env
+from database import client as mongo_client, stations_collection
 
 app = FastAPI(title="EV-Mitra API", version="0.1.0")
 
@@ -32,20 +29,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# MongoDB connection
-# ---------------------------------------------------------------------------
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
-db = mongo_client["evmitra"]
-stations_collection = db["stations"]
-
 
 @app.on_event("startup")
-def check_mongo_connection():
+async def check_mongo_connection():
     try:
-        mongo_client.admin.command("ping")
-        print(f"✅ Connected to MongoDB at {MONGO_URI}")
+        await mongo_client.admin.command("ping")
+        print("✅ Connected to MongoDB")
     except Exception as e:
         print(f"⚠️  Could not connect to MongoDB: {e}")
         print("    /api/stations will fall back to mock data until this is fixed.")
@@ -98,44 +87,49 @@ def route_plan(req: RouteRequest):
 
 
 # ---------------------------------------------------------------------------
-# 2. Smart charging station finder — now reads from MongoDB
+# 2. Smart charging station finder — reads real stations from MongoDB
 # ---------------------------------------------------------------------------
 _FALLBACK_STATIONS = [
-    {"name": "Station A", "distance_km": 2.1, "status": "available",
-     "price_per_kwh": 18, "waiting_vehicles": 0, "fast_charger": True},
-    {"name": "Station B", "distance_km": 3.4, "status": "busy",
-     "price_per_kwh": 16, "waiting_vehicles": 4, "fast_charger": False},
-    {"name": "Station C", "distance_km": 5.2, "status": "available",
-     "price_per_kwh": 20, "waiting_vehicles": 0, "fast_charger": True},
+    {"name": "Connaught Place Charging Hub", "distance_km": 2.1, "status": "available",
+     "price_per_kwh": 18.5, "fast_charger": True, "city": "Delhi"},
+    {"name": "Saket Select Citywalk", "distance_km": 3.4, "status": "available",
+     "price_per_kwh": 12.0, "fast_charger": False, "city": "Delhi"},
+    {"name": "Gurgaon Cyber Hub", "distance_km": 7.3, "status": "available",
+     "price_per_kwh": 18.5, "fast_charger": True, "city": "Gurgaon"},
 ]
 
 
 @app.get("/api/stations")
-def find_stations(lat: Optional[float] = None, lng: Optional[float] = None):
+async def find_stations(city: Optional[str] = None):
     try:
-        stations = list(stations_collection.find({}, {"_id": 0}))
+        query = {"city": city} if city else {}
+        stations = await stations_collection.find(query, {"_id": 0}).to_list(length=100)
         if not stations:
             stations = _FALLBACK_STATIONS
     except Exception:
         stations = _FALLBACK_STATIONS
 
-    best = min(stations, key=lambda s: (s["waiting_vehicles"], s["distance_km"]))
+    # Recommend the closest available station
+    available = [s for s in stations if s["status"] == "available"]
+    best = min(available or stations, key=lambda s: s["distance_km"])
     return {"stations": stations, "ai_recommended": best["name"]}
 
 
 class StationIn(BaseModel):
     name: str
     distance_km: float
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     status: str  # "available" | "busy"
     price_per_kwh: float
-    waiting_vehicles: int
     fast_charger: bool
+    city: str
 
 
 @app.post("/api/stations")
-def add_station(station: StationIn):
+async def add_station(station: StationIn):
     """Add or update a charging station in MongoDB."""
-    stations_collection.update_one(
+    await stations_collection.update_one(
         {"name": station.name}, {"$set": station.model_dump()}, upsert=True
     )
     return {"message": f"Station '{station.name}' saved.", "station": station}
