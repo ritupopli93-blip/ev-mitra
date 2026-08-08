@@ -16,7 +16,7 @@
 const { useState, useEffect } = React;
 
 // Change this if your backend runs somewhere else
-const API_BASE = "http://localhost:8000";
+const API_BASE = "https://ev-mitra.onrender.com";
 
 function Card({ title, children }) {
   return (
@@ -166,7 +166,7 @@ function App() {
         <EmergencyMode />
       </div>
       <footer className="text-center text-slate-600 text-xs mt-10">
-        Backend expected at {API_BASE} — run `uvicorn main:app --reload` inside /backend
+        Backend: {API_BASE}
       </footer>
     </div>
   );
